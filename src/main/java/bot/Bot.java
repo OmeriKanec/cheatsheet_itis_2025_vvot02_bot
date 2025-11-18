@@ -1,6 +1,5 @@
 package bot;
 
-import org.telegram.telegrambots.bots.TelegramWebhookBot;
 import org.telegram.telegrambots.meta.api.methods.BotApiMethod;
 import org.telegram.telegrambots.meta.api.objects.Update;
 
@@ -10,22 +9,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 
-public class Bot extends TelegramWebhookBot {
+public class Bot {
 
     private static final String TELEGRAM_BOT_TOKEN = System.getenv("TELEGRAM_BOT_TOKEN");
-    private static final String BOT_PATH = "webhook";
 
-    @Override
-    public String getBotUsername() {
-        return "Шпаргалка ИТИС 2025 vvot02";
-    }
-
-    @Override
-    public String getBotToken() {
-        return TELEGRAM_BOT_TOKEN;
-    }
-
-    public void sendText(Long chatId, String text) {
+    public static void sendText(Long chatId, String text) {
         String url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
 
         String json = String.format(
@@ -47,8 +35,7 @@ public class Bot extends TelegramWebhookBot {
         }
     }
 
-    @Override
-    public BotApiMethod<?> onWebhookUpdateReceived(Update update) {
+    public static BotApiMethod<?> onWebhookUpdateReceived(Update update) {
         var message = update.getMessage();
         var user = message.getFrom();
         var id = user.getId();
@@ -61,8 +48,4 @@ public class Bot extends TelegramWebhookBot {
         return null;
     }
 
-    @Override
-    public String getBotPath() {
-        return BOT_PATH;
-    }
 }
