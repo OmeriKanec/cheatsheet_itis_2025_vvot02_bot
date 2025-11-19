@@ -27,6 +27,7 @@ public class Bot implements Function<String , Response> {
         return new Response(200, null);
     }
 
+    //Переменная для хранения последнего media_group_id
     private String media_group_id;
 
     public void handleUpdate(JsonObject update) {
@@ -46,7 +47,9 @@ public class Bot implements Function<String , Response> {
         //Обработка фото
         else if (message.has("photo")) {
             JsonArray photos = message.getAsJsonArray("photo");
+            //Если альбом, то должны ответить, что можем обработать только одно фото
             if (message.has("media_group_id")) {
+                //Если уже был ответ на этот альбом, то больше не отвечаем
                 if (String.valueOf(message.get("media_group_id")).equals(media_group_id)){
                     return;
                 }
@@ -77,6 +80,7 @@ public class Bot implements Function<String , Response> {
         }
     }
 
+    //Отправка сообщения пользователю через http запрос
     public void sendText(Long chatId, String text) {
         String url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
 
@@ -99,6 +103,7 @@ public class Bot implements Function<String , Response> {
         }
     }
 
+    //Достаём инструкцию из бакета(так как она публичная для read, то просто http запросом)
     private String getInstructionFromPublicObjectStorage() {
         String url = "https://storage.yandexcloud.net/" + BUCKET_NAME + "/" + OBJECT_KEY;
         try {
@@ -116,6 +121,7 @@ public class Bot implements Function<String , Response> {
         }
     }
 
+    //Запрос к YandexGPT
     private String getGptAnswer(String question, String instruction) {
         String apiUrl = "https://llm.api.cloud.yandex.net/foundationModels/v1/completion";
         JsonObject reqJson = new JsonObject();
@@ -155,6 +161,7 @@ public class Bot implements Function<String , Response> {
         return null;
     }
 
+    //Получем ссылку на скачивание фото по его id
     public String getFilePath(String fileId) {
         String getFileUrl = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + fileId;
         HttpRequest getFileRequest = HttpRequest.newBuilder()
@@ -171,6 +178,8 @@ public class Bot implements Function<String , Response> {
         JsonObject js = JsonParser.parseString(getFileResponse.body()).getAsJsonObject();
         return js.getAsJsonObject("result").get("file_path").getAsString();
     }
+
+    //Скачиваем фото по ссылке в байт массив
     public byte[] downloadTelegramPhoto(String filePath) {
         try {
             HttpClient client = HttpClient.newHttpClient();
@@ -188,6 +197,8 @@ public class Bot implements Function<String , Response> {
         }
     }
 
+    //Отправляем байт массив полученный ранее на распознавание к ocr(конечно же после его перевода в Base64),
+    // так же динамически из filepath получаем расширение фотографии
     public String recognizeTextYandexOcr(byte[] imageBytes, String filePath) {
         try {
             int dotIdx = filePath.lastIndexOf('.');
