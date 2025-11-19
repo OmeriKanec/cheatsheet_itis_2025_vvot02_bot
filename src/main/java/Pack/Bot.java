@@ -7,6 +7,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.Base64;
 import java.util.function.Function;
 
 public class Bot implements Function<String , Response> {
@@ -31,23 +32,18 @@ public class Bot implements Function<String , Response> {
     public void handleUpdate(JsonObject update) {
         if (!update.has("message")) return;
         JsonObject message = update.getAsJsonObject("message");
-        System.out.println("Message: " + message);
         long id = message.getAsJsonObject("chat").get("id").getAsLong();
+        //Обработка текстового сообщения
         if (message.has("text")) {
             String text = message.get("text").getAsString();
             if (text.equals("/start") || text.equals("/help")) {
                 sendText(id, "Я помогу ответить на экзаменационный вопрос по «Операционным системам».\n" +
                         "Присылайте вопрос — фото или текстом.");
             } else {
-                String answer = getGptAnswer(text, getInstructionFromPublicObjectStorage());
-                if (!(answer == null)) {
-                    sendText(id, answer);
-                } else {
-                    sendText(id, "Я не смог подготовить ответ на экзаменационный вопрос.");
-                }
+                processTextWithGpt(text, id);
             }
         }
-
+        //Обработка фото
         else if (message.has("photo")) {
             JsonArray photos = message.getAsJsonArray("photo");
             if (message.has("media_group_id")) {
@@ -58,18 +54,30 @@ public class Bot implements Function<String , Response> {
                 media_group_id = String.valueOf(message.get("media_group_id"));
                 return;
             }
-            String fileId = photos.get(0).getAsJsonObject().get("file_id").getAsString();
-            String recognizedText = null;
+            String fileId = photos.get(photos.size() - 1).getAsJsonObject().get("file_id").getAsString();
+            String filePath = getFilePath(fileId);
+            String recognizedText = recognizeTextYandexOcr(downloadTelegramPhoto(filePath), filePath);
             if (recognizedText == null || recognizedText.isBlank()) {
                 sendText(id, "Я не могу обработать эту фотографию.");
-                return;
+            } else {
+                processTextWithGpt(recognizedText, id);
             }
+        //Всё остальное не поддерживаем
         } else {
             sendText(id, "Я могу обработать только текстовое сообщение или фотографию.");
         }
     }
 
-    public static void sendText(Long chatId, String text) {
+    public void processTextWithGpt(String text, long id) {
+        String answer = getGptAnswer(text, getInstructionFromPublicObjectStorage());
+        if (!(answer == null)) {
+            sendText(id, answer);
+        } else {
+            sendText(id, "Я не смог подготовить ответ на экзаменационный вопрос.");
+        }
+    }
+
+    public void sendText(Long chatId, String text) {
         String url = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/sendMessage";
 
         String json = String.format(
@@ -145,6 +153,74 @@ public class Bot implements Function<String , Response> {
             System.err.println("Ошибка GPT-запроса: " + e.getMessage());
         }
         return null;
+    }
+
+    public String getFilePath(String fileId) {
+        String getFileUrl = "https://api.telegram.org/bot" + TELEGRAM_BOT_TOKEN + "/getFile?file_id=" + fileId;
+        HttpRequest getFileRequest = HttpRequest.newBuilder()
+                .uri(URI.create(getFileUrl))
+                .GET()
+                .build();
+        HttpClient client = HttpClient.newHttpClient();
+        HttpResponse<String> getFileResponse;
+        try {
+            getFileResponse = client.send(getFileRequest, HttpResponse.BodyHandlers.ofString());
+        } catch (IOException | InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        JsonObject js = JsonParser.parseString(getFileResponse.body()).getAsJsonObject();
+        return js.getAsJsonObject("result").get("file_path").getAsString();
+    }
+    public byte[] downloadTelegramPhoto(String filePath) {
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            String downloadUrl = "https://api.telegram.org/file/bot" + TELEGRAM_BOT_TOKEN + "/" + filePath;
+            HttpRequest downloadRequest = HttpRequest.newBuilder()
+                    .uri(URI.create(downloadUrl))
+                    .GET()
+                    .build();
+            HttpResponse<byte[]> downloadResponse = client.send(downloadRequest, HttpResponse.BodyHandlers.ofByteArray());
+
+            return downloadResponse.body();
+        } catch (Exception e) {
+            System.err.println("Ошибка скачивания фото: " + e.getMessage());
+            return null;
+        }
+    }
+
+    public String recognizeTextYandexOcr(byte[] imageBytes, String filePath) {
+        try {
+            int dotIdx = filePath.lastIndexOf('.');
+            String extension = filePath.substring(dotIdx + 1).toLowerCase();
+            String ocrMime = switch (extension) {
+                case "jpg", "jpeg" -> "JPEG";
+                case "png"         -> "PNG";
+                default -> throw new IllegalArgumentException("Неподдерживаемое расширение: " + extension);
+            };
+
+            String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
+            String jsonBody = String.format(
+                    "{\"mimeType\": \"%s\", \"languageCodes\": [\"*\"], " +
+                            "\"model\": \"page\", \"content\": \"%s\"}", ocrMime, imageBase64);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://ocr.api.cloud.yandex.net/ocr/v1/recognizeText"))
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", "Bearer " + YANDEX_API_KEY)
+                    .header("x-folder-id", FOLDER_ID)
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .build();
+
+            HttpClient client = HttpClient.newHttpClient();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            JsonObject respJson = JsonParser.parseString(response.body()).getAsJsonObject();
+            JsonObject result = respJson.getAsJsonObject("result");
+            JsonObject textAnnotation = result.getAsJsonObject("textAnnotation");
+            return textAnnotation.get("fullText").getAsString();
+        } catch (Exception e) {
+            System.err.println("Ошибка OCR-запроса: " + e.getMessage());
+            return null;
+        }
     }
 
 }
