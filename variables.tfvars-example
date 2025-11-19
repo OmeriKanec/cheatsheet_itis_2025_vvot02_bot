@@ -1,0 +1,5 @@
+cloud_id            = "your_cloud_id"
+folder_id           = "your_folder_id"
+tg_bot_key          = "your_tg_bot_key"
+instruction_file_path = "your_instruction_file_path"
+service_account_id = "your_service_account_id"
