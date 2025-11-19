@@ -14,6 +14,16 @@ variable "tg_bot_key" {
   sensitive   = true
 }
 
+variable "instruction_file_path" {
+  description = "Local path to instruction file for YandexGPT"
+  type        = string
+}
+
+variable "service_account_id" {
+  description = "Service account id"
+  type        = string
+}
+
 terraform {
   required_providers {
     yandex = {
@@ -35,6 +45,27 @@ provider "yandex" {
   service_account_key_file  = pathexpand("~/.yc-keys/key.json")
 }
 
+resource "yandex_storage_bucket" "bot_gpt_instructions" {
+  bucket = "${var.folder_id}-gpt-instructions"
+  folder_id = var.folder_id
+  anonymous_access_flags {
+    read        = true
+  }
+}
+
+resource "yandex_storage_object" "gpt_instruction" {
+  bucket = yandex_storage_bucket.bot_gpt_instructions.bucket
+  key    = "instruction.txt"
+  source = var.instruction_file_path
+
+}
+
+resource "yandex_iam_service_account_api_key" "sa_api_key" {
+  service_account_id = var.service_account_id
+  description        = "API key for Yandex AI services"
+}
+
+
 data "archive_file" "bot_code_zip" {
   type        = "zip"
   source_file  = "${path.module}/target/cheatsheet_itis_2025_vvot02_bot-1.0-SNAPSHOT.jar"
@@ -51,6 +82,10 @@ resource "yandex_function" "telegram_bot" {
 
   environment = {
     TELEGRAM_BOT_TOKEN         = var.tg_bot_key
+    BUCKET_NAME           = yandex_storage_bucket.bot_gpt_instructions.bucket
+    OBJECT_KEY            = yandex_storage_object.gpt_instruction.key
+    YANDEX_API_KEY        = yandex_iam_service_account_api_key.sa_api_key.secret_key
+    FOLDER_ID = var.folder_id
   }
 
   content {
